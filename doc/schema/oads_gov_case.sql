@@ -2,6 +2,10 @@
 -- 监管办件跟着一处在册点位走，一条只管一处；固定四步：1申报 2核准 3设置 4验收。
 -- 旧的 t_oads_gov_flow（stage 0..3 那套残缺流转单）不添列、不改名、不动数据；
 -- 本套另起一组等价表承接，与"三档在走流程 t_oads_spot_flow_log"互不串用。
+-- 版本取舍已定死（唯一口径）：申报/核准/设置/验收只走本套 t_oads_gov_case*，
+-- 步次以 t_oads_gov_case_log 逐笔留痕重数为准；旧 t_oads_gov_flow 只保留存量只读回看，
+-- 旧入口（/oadsGovFlow 的 advance/rollback 与 service 的推进/回退/改内容/移除）一律拒绝、
+-- 不在旧表落一笔，旧表数据不迁移、不删除、不改写。
 -- 列名与基线实体契约（@TableName/@TableField）逐列对齐，改列必须同步实体。
 -- 库：chen_026
 
