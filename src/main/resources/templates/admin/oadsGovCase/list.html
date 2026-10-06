@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.pollix.at/thymeleaf/shiro">
+<head>
+    <th:block th:include="include :: header('监管办件（申报/核准/设置/验收）')"/>
+</head>
+<body class="pear-container">
+<div class="layui-card">
+    <div class="layui-card-body">
+        <blockquote class="layui-elem-quote">
+            固定四步：<b>申报 → 核准 → 设置 → 验收</b>，先后不可调换；步次由服务端按留痕重数，报文里带步次只作参考。<br>
+            尚未走完数量（页首与后端同一次查询，不取前端缓存）：<span id="running-count">—</span>
+            <button class="pear-btn pear-btn-sm pear-btn-warming" id="count-refresh-btn">
+                <i class="layui-icon layui-icon-refresh-3"></i> 后端重查
+            </button>
+            <span class="layui-badge layui-bg-gray" style="margin-left:12px;">封存/撤回/划归/作废的记录照常出现，但不给任何操作入口</span>
+        </blockquote>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-body">
+        <table id="case-table" lay-filter="case-table"></table>
+    </div>
+</div>
+
+<script type="text/html" id="case-toolbar">
+    <button shiro:hasPermission="oads:oadsGovCase:open" class="pear-btn pear-btn-primary pear-btn-md" lay-event="intake">
+        <i class="layui-icon layui-icon-add-1"></i> 报入并正式立件（四项输入齐才立）
+    </button>
+</script>
+
+<script type="text/html" id="case-step">
+    {{# var st = d.stepNo; }}
+    {{# if (st == 4) { }}<span class="layui-badge layui-bg-gray">验收</span>
+    {{# } else if (st == 3) { }}<span class="layui-badge layui-bg-blue">设置</span>
+    {{# } else if (st == 2) { }}<span class="layui-badge layui-bg-cyan">核准</span>
+    {{# } else if (st == 1) { }}<span class="layui-badge layui-bg-green">申报</span>
+    {{# } else { }}<span class="layui-badge layui-bg-orange">未起步</span>{{# } }}
+</script>
+
+<script type="text/html" id="case-outcome">
+    {{# if (d.outcome == 'SEALED') { }}<span class="layui-badge layui-bg-gray">已封存(可查不可写)</span>
+    {{# } else if (d.outcome == 'WITHDRAWN') { }}<span class="layui-badge layui-bg-orange">申报后撤回</span>
+    {{# } else if (d.outcome == 'REALIGNED') { }}<span class="layui-badge layui-bg-orange">已划归邻段</span>
+    {{# } else if (d.outcome == 'VOID') { }}<span class="layui-badge layui-bg-black">已作废</span>
+    {{# } else { }}<span class="layui-badge layui-bg-green">在走</span>{{# } }}
+</script>
+
+<!-- 只有在走件给操作入口；其余情形整格留空 -->
+<script type="text/html" id="case-bar">
+    {{# if (d.outcome == 'RUNNING') { }}
+    <button shiro:hasPermission="oads:oadsGovCase:flow" class="pear-btn pear-btn-sm pear-btn-primary" lay-event="advance" title="推进到紧邻下一步">推</button>
+    <button shiro:hasPermission="oads:oadsGovCase:flow" class="pear-btn pear-btn-sm pear-btn-warming" lay-event="returnStep" title="退回一步">退</button>
+    <button shiro:hasPermission="oads:oadsGovCase:flow" class="pear-btn pear-btn-sm pear-btn-normal" lay-event="receiptYes" title="设置步核收记为同意">核收同意</button>
+    <button shiro:hasPermission="oads:oadsGovCase:flow" class="pear-btn pear-btn-sm" lay-event="receiptNo" title="设置步核收未同意">核收未同意</button>
+    <button shiro:hasPermission="oads:oadsGovCase:flow" class="pear-btn pear-btn-sm pear-btn-normal" lay-event="witness" title="验收见证意见">见证</button>
+    <button shiro:hasPermission="oads:oadsGovCase:flow" class="pear-btn pear-btn-sm" lay-event="withdraw" title="申报之后撤回">撤回</button>
+    <button shiro:hasPermission="oads:oadsGovCase:flow" class="pear-btn pear-btn-sm" lay-event="realign" title="路段划归邻段">划归</button>
+    <button shiro:hasPermission="oads:oadsGovCase:flow" class="pear-btn pear-btn-sm pear-btn-danger" lay-event="voidCase" title="从最后一步作废">作废</button>
+    {{# } }}
+    <button class="pear-btn pear-btn-sm" lay-event="trace" title="逐笔留痕追溯">追溯</button>
+</script>
+
+<th:block th:include="include :: footer"/>
+<script>
+    layui.use(['table', 'form', 'jquery', 'layer'], function () {
+        let table = layui.table;
+        let form = layui.form;
+        let $ = layui.jquery;
+        let layer = layui.layer;
+
+        let MODULE_PATH = rootPath + "/oadsGovCase/";
+        let cols = [[
+            {title: 'ID', field: 'id', align: 'center', width: 170},
+            {title: '办件编号', field: 'caseNo', align: 'center', width: 190},
+            {title: '点位编码', field: 'spotNo', align: 'center', width: 110},
+            {title: '所属路段', field: 'areaNo', align: 'center', width: 100},
+            {title: '处数', field: 'placeCount', align: 'center', width: 70},
+            {title: '校核分值', field: 'checkScore', align: 'center', width: 90},
+            {title: '当前步次(服务端重数)', field: 'stepNo', align: 'center', width: 160, toolbar: '#case-step'},
+            {title: '形态', field: 'outcome', align: 'center', width: 170, toolbar: '#case-outcome'},
+            {title: '复验凭证', field: 'recheckCertNo', align: 'center', width: 130},
+            {title: '操作', toolbar: '#case-bar', align: 'center', width: 360, fixed: 'right'}
+        ]];
+
+        table.render({
+            elem: '#case-table',
+            url: MODULE_PATH + 'list',
+            page: true,
+            method: 'get',
+            limit: 10,
+            limits: [10, 20, 50],
+            cols: cols,
+            skin: 'line',
+            toolbar: '#case-toolbar',
+            defaultToolbar: ['refresh', 'filter']
+        });
+
+        function refreshCount() {
+            // 页首数字只认后端这一次查询，不用页面缓存另算。
+            $.get(MODULE_PATH + 'runningCount', function (r) {
+                if (r.code === 200) { $('#running-count').text(r.data); }
+            });
+        }
+        refreshCount();
+        $('#count-refresh-btn').on('click', refreshCount);
+
+        function postThenRefresh(url, data, okMsg) {
+            $.post(url, data, function (r) {
+                if (r.code === 200) {
+                    layer.msg(r.msg || okMsg || '已办', {icon: 1, time: 1400}, function () {
+                        table.reload('case-table');
+                        refreshCount();
+                    });
+                } else {
+                    layer.alert(r.msg, {icon: 2, title: '这一步没办成'});
+                }
+            });
+        }
+
+        table.on('toolbar(case-table)', function (obj) {
+            if (obj.event === 'intake') {
+                layer.open({
+                    type: 1, title: '报入（正式立件前可撤销；同一点位在走唯一）',
+                    shade: 0.1, area: ['560px', '420px'], content: $('#case-intake-panel')
+                });
+            }
+        });
+
+        form.on('submit(case-intake-only)', function (data) {
+            $.post(MODULE_PATH + 'intake', data.field, function (r) {
+                if (r.code !== 200) { layer.alert(r.msg, {icon: 2}); return; }
+                layer.msg('报入已暂存：' + r.data.intakeNo, {icon: 1, time: 1400});
+            });
+            return false;
+        });
+        form.on('submit(case-intake-open)', function (data) {
+            // 同一次并办两回：先报入，再用回执主键正式立件。
+            $.post(MODULE_PATH + 'intake', data.field, function (r1) {
+                if (r1.code !== 200) { layer.alert(r1.msg, {icon: 2}); return; }
+                $.post(MODULE_PATH + 'open', {intakeId: r1.data.id}, function (r2) {
+                    if (r2.code !== 200) { layer.alert(r2.msg, {icon: 2}); return; }
+                    layer.msg(r2.msg, {icon: 1, time: 1500}, function () {
+                        layer.closeAll(); table.reload('case-table'); refreshCount();
+                    });
+                });
+            });
+            return false;
+        });
+
+        table.on('tool(case-table)', function (obj) {
+            let d = obj.data;
+            if (obj.event === 'advance') {
+                layer.prompt({title: '推进 ' + d.spotNo + '：意见（只走紧邻下一步，跨步不生效）', formType: 2},
+                    function (note) { postThenRefresh(MODULE_PATH + 'advance', {caseId: d.id, note: note}, '已推进'); layer.closeAll(); });
+            } else if (obj.event === 'returnStep') {
+                layer.prompt({title: '退回一步：被退步批语按原先后转追溯，重走重新累计', formType: 2},
+                    function (note) { postThenRefresh(MODULE_PATH + 'returnStep', {caseId: d.id, note: note}, '已退回'); layer.closeAll(); });
+            } else if (obj.event === 'receiptYes' || obj.event === 'receiptNo') {
+                let agree = obj.event === 'receiptYes';
+                layer.prompt({title: '设置步核收登记：' + (agree ? '记为同意（验收准入）' : '未记同意（验收不得开始）'), formType: 2},
+                    function (note) {
+                        postThenRefresh(MODULE_PATH + 'recordReceipt',
+                            {caseId: d.id, agree: agree, note: note}, '核收已登记');
+                        layer.closeAll();
+                    });
+            } else if (obj.event === 'witness') {
+                layer.open({type: 1, title: '验收见证（两名见证岗各一笔，同岗第二笔不收）', area: ['520px', '360px'],
+                    content: $('#case-witness-panel'), success: function () {
+                        $('#w-caseId').val(d.id);
+                    }});
+            } else if (obj.event === 'withdraw') {
+                layer.confirm('只受理停在第一步「申报」的件，确认申报之后撤回报备？', function () {
+                    postThenRefresh(MODULE_PATH + 'withdraw', {caseId: d.id}, '已撤回'); layer.closeAll();
+                });
+            } else if (obj.event === 'realign') {
+                layer.prompt({title: '所属路段划归邻段：邻段代号（须在目录在册）', value: d.areaNo},
+                    function (v) { postThenRefresh(MODULE_PATH + 'realign', {caseId: d.id, newAreaNo: v}, '已划归'); layer.closeAll(); });
+            } else if (obj.event === 'voidCase') {
+                layer.confirm('作废只许从最后一步「验收」发起，确认作废？', function () {
+                    postThenRefresh(MODULE_PATH + 'voidCase', {caseId: d.id}, '已作废'); layer.closeAll();
+                });
+            } else if (obj.event === 'trace') {
+                $.get(MODULE_PATH + 'trace', {caseId: d.id}, function (r) {
+                    if (r.code !== 200) { layer.alert(r.msg, {icon: 2}); return; }
+                    let t = r.data;
+                    let html = '<div style="padding:12px;line-height:1.9;">'
+                        + '<b>办件：</b>' + t.govCase.caseNo + '　<b>点位：</b>' + t.govCase.spotNo
+                        + '　<b>服务端重数步次：</b>' + t.recountedStepName
+                        + '　<b>留痕笔数：</b>' + t.ledgerCount
+                        + '<hr><b>逐笔留痕（按时序，含后退转追溯老轮）：</b><ol>';
+                    (t.logs || []).forEach(function (l) {
+                        let actName = {REACH: '走到', RETURN: '退回', WITHDRAW: '撤回', REALIGN: '划归', VOID: '作废'}[l.action] || l.action;
+                        html += '<li style="color:' + (l.active === 1 ? '#000' : '#999') + ';">'
+                            + '[' + l.actedAt + '] 第' + l.stepNo + '步·第' + l.roundNo + '轮·' + actName
+                            + (l.channel ? '·通道' + l.channel : '')
+                            + '（' + (l.operator || '') + '）：' + (l.note == null ? '' : l.note)
+                            + (l.active === 1 ? '' : '（已转追溯）') + '</li>';
+                    });
+                    html += '</ol>';
+                    if (t.currentReceipt) {
+                        html += '<b>设置步本轮核收：</b>' + (t.currentReceipt.agree === 1 ? '记为同意' : '未同意')
+                            + '（' + (t.currentReceipt.note || '') + '）<br>';
+                    }
+                    html += '<b>验收本轮见证：</b>' + (t.currentWitnesses || []).length + ' 名';
+                    (t.currentWitnesses || []).forEach(function (w) {
+                        html += '<br>　' + w.witnessPost + '：' + w.opinion
+                            + (w.certNo ? '（凭证 ' + w.certNo + '）' : '');
+                    });
+                    html += '</div>';
+                    layer.open({type: 1, title: '办件追溯（步次与流水同一串）', area: ['720px', '560px'], content: html});
+                });
+            }
+        });
+
+        form.on('submit(case-witness-submit)', function (data) {
+            $.post(MODULE_PATH + 'submitWitness', data.field, function (r) {
+                if (r.code !== 200) { layer.alert(r.msg, {icon: 2}); return; }
+                layer.msg(r.msg, {icon: 1, time: 1600}, function () {
+                    layer.closeAll(); table.reload('case-table'); refreshCount();
+                });
+            });
+            return false;
+        });
+    });
+</script>
+
+<form class="layui-form" id="case-intake-panel" style="display:none;padding:20px;">
+    <div class="layui-form-item">
+        <label class="layui-form-label">点位编码</label>
+        <div class="layui-input-block">
+            <input type="text" name="spotNo" required lay-verify="required" placeholder="跟着的在册点位编码" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">路段代号</label>
+        <div class="layui-input-block">
+            <input type="text" name="areaNo" required lay-verify="required" placeholder="所属路段，须在目录在册" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">处数</label>
+        <div class="layui-input-inline" style="width:130px;">
+            <input type="text" name="placeCountText" required lay-verify="required" placeholder="正整数" class="layui-input">
+        </div>
+        <label class="layui-form-label" style="width:100px;">校核分值</label>
+        <div class="layui-input-inline" style="width:130px;">
+            <input type="text" name="checkScoreText" required lay-verify="required" placeholder="拟判定，非负整数" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <div class="layui-input-block">
+            <button class="pear-btn pear-btn-primary" lay-submit lay-filter="case-intake-open">报入并正式立件</button>
+            <button class="pear-btn pear-btn-warming" lay-submit lay-filter="case-intake-only">只报入暂存</button>
+        </div>
+    </div>
+</form>
+
+<form class="layui-form" id="case-witness-panel" style="display:none;padding:20px;">
+    <input type="hidden" id="w-caseId" name="caseId">
+    <div class="layui-form-item">
+        <label class="layui-form-label">见证岗</label>
+        <div class="layui-input-block">
+            <input type="text" name="witnessPost" required lay-verify="required" placeholder="见证岗代号，两名各提交一次" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">见证意见</label>
+        <div class="layui-input-block">
+            <textarea name="opinion" required lay-verify="required" class="layui-textarea"></textarea>
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">复验凭证</label>
+        <div class="layui-input-block">
+            <input type="text" name="certNo" placeholder="复验凭证编码；两名齐且有凭证才回写封存" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <div class="layui-input-block">
+            <button class="pear-btn pear-btn-primary" lay-submit lay-filter="case-witness-submit">提交见证意见</button>
+        </div>
+    </div>
+</form>
+</body>
+</html>

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.pollix.at/thymeleaf/shiro">
+<head>
+    <th:block th:include="include :: header('设置许可核准单整单')"/>
+</head>
+<body class="pear-container">
+<div class="layui-card">
+    <div class="layui-card-body">
+        <button class="pear-btn pear-btn-md" onclick="history.back()">
+            <i class="layui-icon layui-icon-return"></i> 返回台账
+        </button>
+        <span id="permit-sealed-tag" style="margin-left:16px;"></span>
+    </div>
+</div>
+<div id="permit-stages"></div>
+
+<div class="layui-card" id="permit-sign-card" style="display:none;">
+    <div class="layui-card-header">
+        当前节签署（段次由服务端按整单当前所在节点出，此表不填段次）
+    </div>
+    <div class="layui-card-body">
+        <form class="layui-form" id="permit-sign-form">
+            <input type="hidden" name="billId" th:value="${billId}">
+            <div class="layui-form-item">
+                <label class="layui-form-label">判断</label>
+                <div class="layui-input-inline">
+                    <select name="opinion" lay-verify="required">
+                        <option value="1">同意</option>
+                        <option value="2">不同意</option>
+                    </select>
+                </div>
+            </div>
+            <div class="layui-form-item">
+                <label class="layui-form-label">签署文本</label>
+                <div class="layui-input-block">
+                    <textarea name="content" class="layui-textarea" placeholder="原文入库留痕，本段保留首次那句"></textarea>
+                </div>
+            </div>
+            <div class="layui-form-item">
+                <div class="layui-input-block">
+                    <button shiro:hasPermission="oads:oadsPermitBill:sign"
+                            class="pear-btn pear-btn-primary pear-btn-md" lay-submit lay-filter="permit-sign-submit">
+                        提交这一笔
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-header">点位主档变更履历（按时刻倒序）</div>
+    <div class="layui-card-body">
+        <table id="permit-history-table"></table>
+    </div>
+</div>
+
+<th:block th:include="include :: footer"/>
+<script>
+    layui.use(['table', 'form', 'jquery', 'layer'], function () {
+        let table = layui.table;
+        let form = layui.form;
+        let $ = layui.jquery;
+        let layer = layui.layer;
+        let MODULE_PATH = rootPath + "/oadsPermitBill/";
+        let billId = $('input[name="billId"]').val();
+
+        let stateNames = ['未挂设', '挂设在册', '整块拆除'];
+
+        function loadDetail() {
+            $.get(MODULE_PATH + 'detailData/' + billId, function (result) {
+                if (result.code !== 200) {
+                    layer.msg(result.msg, {icon: 2});
+                    return;
+                }
+                render(result.data);
+            });
+        }
+
+        function render(view) {
+            let bill = view.bill;
+            let sealed = bill.status === 1;
+            $('#permit-sealed-tag').html(sealed
+                ? '<span class="layui-badge layui-bg-green">已封存：不得再进一笔、不得改一字、不得整张撤回</span>'
+                : '<span class="layui-badge layui-bg-blue">在签</span>');
+            $('#permit-sign-card').toggle(!sealed);
+
+            let html = '';
+            view.stages.forEach(function (s) {
+                let head = '<div class="layui-card"><div class="layui-card-header">'
+                    + (s.current ? '<span class="layui-badge layui-bg-blue">当前节</span> ' : '')
+                    + (s.passed ? '<span class="layui-badge layui-bg-green">已通过</span> ' : '')
+                    + '第' + (s.nodeNo + 1) + '段 ' + s.stageName + '（' + s.postName
+                    + '，应到' + s.needCount + '人，本轮到' + s.signCount + '笔，第' + s.roundNo + '轮）'
+                    + '</div><div class="layui-card-body"><table class="layui-table">'
+                    + '<thead><tr><th>笔序</th><th>轮次</th><th>签署人</th><th>判断</th><th>落单时刻</th><th>在档</th><th>文本</th></tr></thead><tbody>';
+                let rows = '';
+                s.signs.forEach(function (g) {
+                    rows += '<tr><td>' + g.seqNo + '</td><td>第' + g.roundNo + '轮</td><td>' + g.signer + '</td>'
+                        + '<td>' + (g.opinion === 1 ? '同意' : '不同意') + '</td><td>' + (g.signTime || '') + '</td>'
+                        + '<td>' + (g.active === 1 ? '本轮' : '已随清轮退出（留痕可查）') + '</td>'
+                        + '<td>' + (g.content || '') + '</td></tr>';
+                });
+                html += head + (rows || '<tr><td colspan="7">本段尚无落单</td></tr>') + '</tbody></table></div></div>';
+            });
+            $('#permit-stages').html(html);
+
+            table.render({
+                elem: '#permit-history-table',
+                data: [],
+                cols: [[
+                    {title: '时刻', field: 'changeTime'},
+                    {title: '依据核准单', field: 'billNo'},
+                    {title: '情形', field: 'changeKind'},
+                    {title: '从哪档', templet: function (d) { return stateNames[d.fromState] + '（第' + d.fromVer + '档）'; }},
+                    {title: '到哪档', templet: function (d) { return stateNames[d.toState] + '（第' + d.toVer + '档）'; }},
+                    {title: '操作人', field: 'operateBy'}
+                ]],
+                skin: 'line', page: false
+            });
+            $.get(MODULE_PATH + 'history', {spotId: bill.spotId}, function (r) {
+                if (r.code === 200) {
+                    table.reload('permit-history-table', {data: r.data});
+                }
+            });
+        }
+
+        form.on('submit(permit-sign-submit)', function (data) {
+            $.ajax({
+                url: MODULE_PATH + 'sign',
+                type: 'post',
+                data: data.field,
+                success: function (result) {
+                    if (result.code === 200) {
+                        layer.msg(result.msg, {icon: 1, time: 1500}, loadDetail);
+                    } else {
+                        layer.msg(result.msg, {icon: 2});
+                    }
+                }
+            });
+            return false;
+        });
+
+        loadDetail();
+    });
+</script>
+</body>
+</html>

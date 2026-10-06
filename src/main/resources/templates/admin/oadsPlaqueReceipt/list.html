@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.pollix.at/thymeleaf/shiro">
+<head>
+    <th:block th:include="include :: header('牌匾更换名册收讫（点行数·验数据·定去向·出回执）')"/>
+</head>
+<body class="pear-container">
+<div class="layui-card">
+    <div class="layui-card-body">
+        <blockquote class="layui-elem-quote">
+            一次报送为一册，一册含若干行；册不拆开送，行不跨册走。收讫四步连着做完，中间没有人工兜底。<br>
+            单册行数上限只认本册抬头那一格：空着、负数、大得没边都按 <b th:text="${defaultRowLimit}">200</b> 认，别处不设第二条来源。<br>
+            点位编码规范位数：至少 <b th:text="${codeMinLen}">6</b> 位、至多 <b th:text="${codeMaxLen}">32</b> 位；
+            身份只认编码全等配主档，不按版面名称近似去配。
+        </blockquote>
+        <form class="layui-form" action="">
+            <div class="layui-form-item">
+                <label class="layui-form-label">季度码</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="quarterCode" placeholder="如 2026Q4" class="layui-input">
+                </div>
+                <button class="pear-btn pear-btn-md pear-btn-primary" lay-submit lay-filter="book-query">
+                    <i class="layui-icon layui-icon-search"></i> 查册账
+                </button>
+                <button type="reset" class="pear-btn pear-btn-md">
+                    <i class="layui-icon layui-icon-refresh"></i> 重置
+                </button>
+                <button shiro:hasPermission="oads:oadsPlaqueReceipt:receive" type="button"
+                        class="pear-btn pear-btn-md pear-btn-warming" id="send-btn">
+                    <i class="layui-icon layui-icon-add-1"></i> 整册上送（一册一次交完整，不接零散逐行）
+                </button>
+                <button shiro:hasPermission="oads:oadsPlaqueReceipt:reconcile" type="button"
+                        class="pear-btn pear-btn-md" id="reconcile-btn">
+                    <i class="fa fa-balance-scale"></i> 销账流水对账（差以流水为准）
+                </button>
+                <button shiro:hasPermission="oads:oadsPlaqueReceipt:archive" type="button"
+                        class="pear-btn pear-btn-md" id="archive-btn">
+                    <i class="fa fa-archive"></i> 老化归档（满两年度待核行进历史层）
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-body">
+        <table id="book-table" lay-filter="book-table"></table>
+    </div>
+</div>
+
+<script type="text/html" id="book-bar">
+    <button shiro:hasPermission="oads:oadsPlaqueReceipt:view" class="pear-btn pear-btn-sm pear-btn-primary" lay-event="receipt">出回执（回库逐行数）</button>
+    <button shiro:hasPermission="oads:oadsPlaqueReceipt:list" class="pear-btn pear-btn-sm" lay-event="rowsCurrent">现行行</button>
+    <button shiro:hasPermission="oads:oadsPlaqueReceipt:list" class="pear-btn pear-btn-sm" lay-event="rowsHistory">历史卷宗</button>
+</script>
+
+<script type="text/html" id="book-channel">
+    {{# if (d.putKind == 'CITY') { }}<span class="layui-badge">市级复核</span>
+    {{# } else { }}<span class="layui-badge layui-bg-blue">区级报送</span>{{# } }}
+    {{# if (d.dupCount > 0) { }}<span class="layui-badge layui-bg-orange">重送{{d.dupCount}}回（未重复入行）</span>{{# } }}
+</script>
+
+<script type="text/html" id="book-overlimit">
+    {{# if (d.overLimit == 1) { }}<span class="layui-badge layui-bg-red">越上限（点数{{d.countedRows}}&gt;{{d.rowLimit}}），照收点名</span>
+    {{# } else { }}<span class="layui-badge layui-bg-green">{{d.countedRows}}≤{{d.rowLimit}}</span>{{# } }}
+</script>
+
+<th:block th:include="include :: footer"/>
+<script>
+    layui.use(['table', 'form', 'jquery', 'layer'], function () {
+        let table = layui.table;
+        let form = layui.form;
+        let $ = layui.jquery;
+        let layer = layui.layer;
+        let MODULE_PATH = rootPath + "/oadsPlaqueReceipt/";
+
+        table.render({
+            elem: '#book-table',
+            url: MODULE_PATH + 'listBooks',
+            method: 'get',
+            page: false,
+            cols: [[
+                {title: '批次码', field: 'batchNo', align: 'center', width: 150},
+                {title: '册号', field: 'bookNo', align: 'center', width: 150},
+                {title: '单位', field: 'unitNo', align: 'center', width: 110},
+                {title: '季度', field: 'quarterCode', align: 'center', width: 90},
+                {title: '通道/重送', align: 'center', width: 230, toolbar: '#book-channel'},
+                {title: '抬头原文', field: 'rowLimitRaw', align: 'center', width: 100},
+                {title: '认下上限', field: 'rowLimit', align: 'center', width: 80},
+                {title: '点行数/上限', align: 'center', width: 200, toolbar: '#book-overlimit'},
+                {title: '本册行数', field: 'countedRows', align: 'center', width: 90},
+                {title: '入库', field: 'acceptedRows', align: 'center', width: 70},
+                {title: '退回', field: 'returnedRows', align: 'center', width: 70},
+                {title: '收讫时刻', field: 'receivedAt', align: 'center', width: 170},
+                {title: '操作', toolbar: '#book-bar', align: 'center', width: 300, fixed: 'right'}
+            ]],
+            skin: 'line',
+            defaultToolbar: ['refresh', 'filter']
+        });
+
+        form.on('submit(book-query)', function (data) {
+            table.reload('book-table', {where: data.field, page: {curr: 1}});
+            return false;
+        });
+
+        function verdictBadge(v) {
+            if (v === 'PASS') return '<span class="layui-badge layui-bg-green">通过</span>';
+            if (v === 'REJECT') return '<span class="layui-badge layui-bg-red">退回</span>';
+            return '<span class="layui-badge layui-bg-blue">待核</span>';
+        }
+
+        function showReceipt(batchNo) {
+            $.get(MODULE_PATH + 'receipt', {batchNo: batchNo}, function (r) {
+                if (r.code !== 200) { layer.msg(r.msg, {icon: 2}); return; }
+                let d = r.data;
+                let html = '';
+                html += '<div style="line-height:1.9;">';
+                html += '<b>批次码：</b>' + d.batchNo + '　<b>季度：</b>' + (d.quarterCode || '') + '<br>';
+                html += '<b>三数（一律回库逐行数）：</b>'
+                    + '本册行数 <b>' + d.totalRows + '</b> ＝ 入库 <b>' + d.acceptedRows + '</b> ＋ 退回 <b>' + d.returnedRows + '</b>　'
+                    + (d.balanced ? '<span class="layui-badge layui-bg-green">入库+退回=本册行数，互印平齐</span>'
+                                 : '<span class="layui-badge layui-bg-red">对不齐，逐行点名见下</span>') + '<br>';
+                html += '<span style="color:#666;">' + (d.note || '') + '</span>';
+                if (d.masterDiffRows && d.masterDiffRows.length) {
+                    html += '<br><b style="color:#c0392b;">报文与主档有出入的行（以主档为准）：</b><br>';
+                    d.masterDiffRows.forEach(function (it) {
+                        html += '第' + it.rowNo + '行 ' + (it.spotNo || '')
+                            + '：版面名 报文「' + (it.reportViewName || '') + '」→主档「' + (it.masterViewName || '') + '」；'
+                            + '路段 报文「' + (it.reportRoadCode || '') + '」→主档「' + (it.masterRoadCode || '') + '」<br>';
+                    });
+                }
+                if (d.mismatches && d.mismatches.length) {
+                    html += '<br><b style="color:#c0392b;">对不齐逐行/逐数点名（不接受“基本相符”）：</b><br>';
+                    d.mismatches.forEach(function (m) {
+                        html += (m.rowNo ? '第' + m.rowNo + '行 ' : '') + (m.spotNo || '') + '：' + m.detail + '<br>';
+                    });
+                }
+                html += '<table class="layui-table" style="margin-top:8px;"><thead><tr>'
+                    + '<th>行次</th><th>点位编码</th><th>结论</th><th>计入</th><th>应更换</th><th>核验合格</th>'
+                    + '<th>照片</th><th>退回理由/待核缘由</th></tr></thead><tbody>';
+                d.rows.forEach(function (it) {
+                    html += '<tr><td>' + it.rowNo + '</td><td>' + (it.spotNo || '（缺填）') + '</td>'
+                        + '<td>' + verdictBadge(it.verdict) + '</td>'
+                        + '<td>' + (it.accepted ? '入库' : '退回') + '</td>'
+                        + '<td>' + (it.qty == null ? '未到' : it.qty) + '</td>'
+                        + '<td>' + (it.chkNum == null ? '未到' : it.chkNum) + '</td>'
+                        + '<td>' + (it.photoPending ? '<span class="layui-badge layui-bg-blue">缺照占位</span>' : '已随册/已补挂') + '</td>'
+                        + '<td style="text-align:left;">' + (it.rejectReason || '') + '</td></tr>';
+                });
+                html += '</tbody></table></div>';
+                layer.open({type: 1, title: '收讫回执（批次码 ' + d.batchNo + '）', area: ['1100px', '600px'], content: html});
+            });
+        }
+
+        function showRows(batchNo, layerNo, title) {
+            $.get(MODULE_PATH + 'listRows', {batchNo: batchNo, layer: layerNo}, function (r) {
+                if (r.code !== 200) { layer.msg(r.msg, {icon: 2}); return; }
+                let html = '<table class="layui-table"><thead><tr>'
+                    + '<th>行次</th><th>点位编码</th><th>版面名(报文)</th><th>路段(报文)</th>'
+                    + '<th>应更换</th><th>核验合格</th><th>结论</th><th>照片</th><th>主档差异</th>'
+                    + (layerNo === 0 ? '<th>补挂</th>' : '') + '</tr></thead><tbody>';
+                if (!r.data.length) {
+                    html += '<tr><td colspan="10" style="text-align:center;color:#999;">无行（历史卷宗层为空是常态，存量不补零）</td></tr>';
+                }
+                r.data.forEach(function (x) {
+                    html += '<tr><td>' + x.rowNo + '</td><td>' + (x.spotNo || '（缺填）') + '</td>'
+                        + '<td>' + (x.viewName || '') + '</td><td>' + (x.roadCode || '') + '</td>'
+                        + '<td>' + (x.qty == null ? '未到' : x.qty) + '</td>'
+                        + '<td>' + (x.chkNum == null ? '未到' : x.chkNum) + '</td>'
+                        + '<td>' + verdictBadge(x.verdict) + '</td>'
+                        + '<td>' + (x.photoNo || '（空着占位）') + '</td>'
+                        + '<td>' + (x.masterDiff == 1 ? '有出入·以主档为准' : '平') + '</td>';
+                    if (layerNo === 0) {
+                        html += '<td>' + (x.verdict === 'PENDING'
+                            ? '<button class="pear-btn pear-btn-sm pear-btn-normal" onclick="attachPhoto(\'' + batchNo + '\',' + x.rowNo + ')">补挂照片</button>' : '—') + '</td>';
+                    }
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+                layer.open({type: 1, title: title + '（批次码 ' + batchNo + '）', area: ['1150px', '600px'], content: html});
+            });
+        }
+
+        window.attachPhoto = function (batchNo, rowNo) {
+            layer.prompt({title: '第' + rowNo + '行补挂照片附件编号', formType: 0}, function (photoNo, index) {
+                $.post(MODULE_PATH + 'attachPhoto', {batchNo: batchNo, rowNo: rowNo, photoNo: photoNo}, function (r) {
+                    if (r.code === 200) { layer.close(index); layer.msg(r.msg, {icon: 1}); table.reload('book-table'); }
+                    else { layer.msg(r.msg, {icon: 2}); }
+                });
+            });
+        };
+
+        table.on('tool(book-table)', function (obj) {
+            let batchNo = obj.data.batchNo;
+            if (obj.event === 'receipt') { showReceipt(batchNo); }
+            else if (obj.event === 'rowsCurrent') { showRows(batchNo, 0, '现行层行（现行名单只列这一层）'); }
+            else if (obj.event === 'rowsHistory') { showRows(batchNo, 1, '历史卷宗层行（存量一条不减，照常可查）'); }
+        });
+
+        $('#reconcile-btn').on('click', function () {
+            $.post(MODULE_PATH + 'reconcile', {}, function (r) {
+                if (r.code !== 200) { layer.msg(r.msg, {icon: 2}); return; }
+                let d = r.data;
+                let html = '<div style="line-height:1.9;">' + d.note + '<br>';
+                if (d.diffs && d.diffs.length) {
+                    html += '<table class="layui-table"><thead><tr><th>批次码</th><th>字段</th><th>销账</th><th>流水</th><th>说明</th></tr></thead><tbody>';
+                    d.diffs.forEach(function (x) {
+                        html += '<tr><td>' + x.batchNo + '</td><td>' + x.field + '</td><td>' + x.ledgerValue
+                            + '</td><td>' + x.flowValue + '</td><td style="text-align:left;">' + x.detail + '</td></tr>';
+                    });
+                    html += '</tbody></table>';
+                }
+                html += '</div>';
+                layer.open({type: 1, title: '销账与流水对账（账实差以流水为准）', area: ['900px', '500px'], content: html});
+                table.reload('book-table');
+            });
+        });
+
+        $('#archive-btn').on('click', function () {
+            $.post(MODULE_PATH + 'archiveAging', {}, function (r) {
+                if (r.code !== 200) { layer.msg(r.msg, {icon: 2}); return; }
+                layer.alert(r.msg, {title: '老化归档（截止年度 ' + r.data.asOfYear + '）'});
+                table.reload('book-table');
+            });
+        });
+
+        // 整册上送：报文即 JSON，一次交完整。
+        $('#send-btn').on('click', function () {
+            layer.open({
+                type: 1, title: '整册上送（一册一次交完整；行不许游移到别册）', area: ['820px', '560px'],
+                content: '<div style="padding:16px;">'
+                    + '<div class="layui-form-item">通道：'
+                    + '<input type="radio" name="sendChannel" value="AREA" title="区级报送" checked>'
+                    + '<input type="radio" name="sendChannel" value="CITY" title="市级复核（第二回不重复入行）"></div>'
+                    + '<textarea id="send-json" class="layui-textarea" style="height:420px;" placeholder='
+                    + "'整册 JSON：{batchNo,bookNo,unitNo,quarterCode,rowLimitRaw,rows:[{spotNo,viewName,roadCode,qtyText,chkNumText,photoNo,verdictRaw}]}'></textarea>"
+                    + '<div style="margin-top:10px;text-align:right;"><button class="pear-btn pear-btn-primary" id="send-confirm">交册收讫（四步连着做）</button></div>'
+                    + '</div>',
+                success: function () {
+                    form.render();
+                    $('#send-confirm').on('click', function () {
+                        let channel = $('input[name=sendChannel]:checked').val() || 'AREA';
+                        let payload;
+                        try { payload = JSON.parse($('#send-json').val()); }
+                        catch (e) { layer.msg('整册 JSON 解析不开：' + e.message, {icon: 2}); return; }
+                        if (!payload.rows || !payload.rows.length) { layer.msg('一册含若干行，空册/零散逐行不收', {icon: 2}); return; }
+                        $.ajax({
+                            url: MODULE_PATH + (channel === 'CITY' ? 'receiveCity' : 'receiveArea'),
+                            type: 'POST', contentType: 'application/json', data: JSON.stringify(payload),
+                            success: function (r) {
+                                if (r.code !== 200) { layer.msg(r.msg, {icon: 2}); return; }
+                                layer.closeAll();
+                                layer.alert(r.msg || '已收讫', {title: '收讫回执同次算出'});
+                                table.reload('book-table');
+                            }
+                        });
+                    });
+                }
+            });
+        });
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.pollix.at/thymeleaf/shiro">
+<head>
+    <th:block th:include="include :: header('点位名册（五检查点）')"/>
+</head>
+<body class="pear-container">
+<div class="layui-card">
+    <div class="layui-card-body">
+        <form class="layui-form" action="">
+            <div class="layui-form-item">
+                <label class="layui-form-label">点位编码</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="spotNo" placeholder="点位编码" class="layui-input">
+                </div>
+                <label class="layui-form-label">路段代号</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="areaNo" placeholder="路段代号" class="layui-input">
+                </div>
+                <label class="layui-form-label">路段类别</label>
+                <div class="layui-input-inline">
+                    <select name="areaKind">
+                        <option value="">全部</option>
+                        <option value="主干道">主干道</option>
+                        <option value="次干道">次干道</option>
+                        <option value="背街巷">背街巷</option>
+                    </select>
+                </div>
+                <label class="layui-form-label">匹配</label>
+                <div class="layui-input-inline" style="width:110px;">
+                    <select name="matchMode">
+                        <option value="eq">全等</option>
+                        <option value="prefix">前缀匹配</option>
+                    </select>
+                </div>
+                <button class="pear-btn pear-btn-md pear-btn-primary" lay-submit lay-filter="book-query">
+                    <i class="layui-icon layui-icon-search"></i> 查询
+                </button>
+                <button type="reset" class="pear-btn pear-btn-md">
+                    <i class="layui-icon layui-icon-refresh"></i> 重置
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-body">
+        <blockquote class="layui-elem-quote">
+            当前季度：<b th:text="${quarterCode}">2026Q4</b>；
+            名册总数：<span id="book-total">—</span>；
+            三视图处数（同一份基础数据）：
+            按辖段类别 <span id="view-kind-sum">—</span> ／
+            按路段代号 <span id="view-no-sum">—</span> ／
+            按建档情形 <span id="view-build-sum">—</span>
+            <span id="view-eq" class="layui-badge layui-bg-green">三处一致</span>
+            <button class="pear-btn pear-btn-sm pear-btn-warming" id="view-refresh-btn">
+                <i class="layui-icon layui-icon-auz"></i> 重数三视图
+            </button>
+            <button class="pear-btn pear-btn-sm" id="sync-city-btn">
+                <i class="layui-icon layui-icon-refresh-3"></i> 市里每日增量
+            </button>
+            <span class="pear-btn-sm" style="margin-left:20px;">每页条数（区局配置）：
+                <input type="number" id="cfg-page-size" th:value="${pageSize}" style="width:70px;height:30px;" min="1">
+                <button class="pear-btn pear-btn-sm pear-btn-normal" id="cfg-page-btn">改条数</button>
+            </span>
+        </blockquote>
+        <blockquote class="layui-elem-quote layui-quote-nm" id="view-detail" style="display:none;"></blockquote>
+    </div>
+</div>
+
+<div class="layui-card">
+    <div class="layui-card-body">
+        <table id="book-table" lay-filter="book-table" th:attr="data-pagesize=${pageSize},data-quarter=${quarterCode}"></table>
+    </div>
+</div>
+
+<script type="text/html" id="book-toolbar">
+    <button shiro:hasPermission="oads:oadsSpotBook:build" class="pear-btn pear-btn-primary pear-btn-md" lay-event="build">
+        <i class="layui-icon layui-icon-add-1"></i> 建档岗逐条建立 / 集中更换带出（同一表单同一套判定）
+    </button>
+</script>
+
+<script type="text/html" id="book-bar">
+    <button shiro:hasPermission="oads:oadsSpotBook:flow" class="pear-btn pear-btn-sm pear-btn-primary" lay-event="advance" title="往上推一步">推</button>
+    <button shiro:hasPermission="oads:oadsSpotBook:flow" class="pear-btn pear-btn-sm pear-btn-warming" lay-event="returnStep" title="退回一步重来">退</button>
+    <button shiro:hasPermission="oads:oadsSpotBook:flow" class="pear-btn pear-btn-sm" lay-event="hold" title="就地停住">停</button>
+    <button shiro:hasPermission="oads:oadsSpotBook:edit" class="pear-btn pear-btn-sm pear-btn-normal" lay-event="correctGot" title="更正已核验落地处数">更正处数</button>
+    <button shiro:hasPermission="oads:oadsSpotBook:edit" class="pear-btn pear-btn-sm pear-btn-danger" lay-event="rehang" title="改挂别的路段目录">改挂</button>
+</script>
+
+<script type="text/html" id="book-step">
+    {{# var st = d.flowStep; }}
+    {{# if (st == 3) { }}<span class="layui-badge layui-bg-gray">压卡(冻结)</span>
+    {{# } else if (st == 2) { }}<span class="layui-badge layui-bg-green">已核</span>
+    {{# } else if (st == 1) { }}<span class="layui-badge layui-bg-blue">待核</span>
+    {{# } else { }}<span class="layui-badge layui-bg-orange">旧行未起步</span>{{# } }}
+</script>
+
+<script type="text/html" id="book-buildkind">
+    {{# if (d.buildKind == 'BATCH') { }}集中更换带出
+    {{# } else if (d.buildKind == 'MANUAL') { }}建档岗逐条
+    {{# } else { }}纸簿旧存量{{# } }}
+</script>
+
+<th:block th:include="include :: footer"/>
+<script>
+    layui.use(['table', 'form', 'jquery', 'layer'], function () {
+        let table = layui.table;
+        let form = layui.form;
+        let $ = layui.jquery;
+        let layer = layui.layer;
+
+        let MODULE_PATH = rootPath + "/oadsSpotBook/";
+        let cols = [[
+            {title: 'ID', field: 'id', align: 'center', width: 160},
+            {title: '点位编码', field: 'spotNo', align: 'center'},
+            {title: '路段代号', field: 'areaNo', align: 'center', width: 90},
+            {title: '路段全称（目录为准）', field: 'areaName', align: 'left'},
+            {title: '经度', field: 'longitude', align: 'center', width: 110},
+            {title: '纬度', field: 'latitude', align: 'center', width: 110},
+            {title: '核定应设', field: 'needNum', align: 'center', width: 80},
+            {title: '已核验', field: 'gotNum', align: 'center', width: 80},
+            {title: '待补(轧出)', field: 'lackNum', align: 'center', width: 90},
+            {title: '季度', field: 'quarterCode', align: 'center', width: 80},
+            {title: '建档情形', field: 'buildKind', align: 'center', width: 110, toolbar: '#book-buildkind'},
+            {title: '在走档', field: 'flowStep', align: 'center', width: 100, toolbar: '#book-step'},
+            {title: '操作', toolbar: '#book-bar', align: 'center', width: 250, fixed: 'right'}
+        ]];
+
+        table.render({
+            elem: '#book-table',
+            url: MODULE_PATH + 'list',
+            page: true,
+            method: 'get',
+            limit: Number($('#book-table').attr('data-pagesize')) || 10,
+            limits: [10, 20, 50],
+            cols: cols,
+            skin: 'line',
+            toolbar: '#book-toolbar',
+            defaultToolbar: ['refresh', 'filter']
+        });
+
+        function refreshViews() {
+            $.get(MODULE_PATH + 'viewCounts', function (r) {
+                if (r.code !== 200) { layer.msg(r.msg, {icon: 2}); return; }
+                let c = r.data;
+                let sum = function (m) {
+                    return Object.keys(m || {}).reduce(function (a, k) { return a + m[k]; }, 0);
+                };
+                let sKind = sum(c.byAreaKind), sNo = sum(c.byAreaNo), sBuild = sum(c.byBuildKind);
+                $('#book-total').text(c.total);
+                $('#view-kind-sum').text(sKind);
+                $('#view-no-sum').text(sNo);
+                $('#view-build-sum').text(sBuild);
+                let same = (sKind === sNo && sNo === sBuild && sBuild === c.total);
+                $('#view-eq').toggleClass('layui-bg-green', same).toggleClass('layui-bg-red', !same)
+                    .text(same ? '三处一致' : '处数不平（异常）');
+                $('#view-detail').show().html(
+                    '按辖段类别：' + JSON.stringify(c.byAreaKind) + '<br>' +
+                    '按路段代号：' + JSON.stringify(c.byAreaNo) + '<br>' +
+                    '按建档情形：' + JSON.stringify(c.byBuildKind) +
+                    (c.total === 0 ? '<br>本季度本辖段未建行：视图留空为合法结果，不以邻段数据补齐。' : ''));
+            });
+        }
+        refreshViews();
+        $('#view-refresh-btn').on('click', refreshViews);
+
+        form.on('submit(book-query)', function (data) {
+            table.reload('book-table', {where: data.field, page: {curr: 1}});
+            return false;
+        });
+
+        function postThenRefresh(url, data, okMsg) {
+            $.post(url, data, function (r) {
+                if (r.code === 200) {
+                    layer.msg(r.msg || okMsg || '已办', {icon: 1, time: 1200}, function () {
+                        table.reload('book-table');
+                        refreshViews();
+                    });
+                } else {
+                    // 五个检查点各有各的提示语，原文弹出，不并句。
+                    layer.alert(r.msg, {icon: 2, title: '这一步没办成'});
+                }
+            });
+        }
+
+        table.on('toolbar(book-table)', function (obj) {
+            if (obj.event === 'build') {
+                layer.open({
+                    type: 1, title: '建行（建档岗逐条／集中更换带出，同一表单同一套五检查点）',
+                    shade: 0.1, area: ['560px', '520px'], content: $('#book-build-panel')
+                });
+            }
+        });
+
+        table.on('tool(book-table)', function (obj) {
+            let d = obj.data;
+            if (obj.event === 'advance') {
+                layer.prompt({title: '推进点位 ' + d.spotNo + '：备注（档由系统数，不用填档）', formType: 2},
+                    function (note) { postThenRefresh(MODULE_PATH + 'advance', {spotId: d.id, note: note}, '已推进一步'); layer.closeAll(); });
+            } else if (obj.event === 'returnStep') {
+                layer.prompt({title: '退回一步重来（上一轮留痕保留，不与后补并在一起）', formType: 2},
+                    function (note) { postThenRefresh(MODULE_PATH + 'returnStep', {spotId: d.id, note: note}, '已退回'); layer.closeAll(); });
+            } else if (obj.event === 'hold') {
+                layer.prompt({title: '就地停住（同点位名额随即空出，要继续只能另开一行）', formType: 2},
+                    function (note) { postThenRefresh(MODULE_PATH + 'hold', {spotId: d.id, note: note}, '已停住'); layer.closeAll(); });
+            } else if (obj.event === 'correctGot') {
+                layer.prompt({title: '更正已核验落地处数（待补随即重算覆盖）', value: d.gotNum == null ? '' : String(d.gotNum)},
+                    function (v) { postThenRefresh(MODULE_PATH + 'correctGot', {spotId: d.id, newGot: v}, '已更正'); layer.closeAll(); });
+            } else if (obj.event === 'rehang') {
+                layer.prompt({title: '改挂：新路段代号,经度,纬度（现场采集，重走围栏与名录两关）', formType: 0},
+                    function (v) {
+                        let p = v.split(',');
+                        if (p.length !== 3) { layer.msg('按 路段代号,经度,纬度 填', {icon: 2}); return; }
+                        postThenRefresh(MODULE_PATH + 'rehang',
+                            {spotId: d.id, newAreaNo: p[0].trim(), longitude: p[1].trim(), latitude: p[2].trim()},
+                            '已改挂并重算待补');
+                        layer.closeAll();
+                    });
+            }
+        });
+
+        // 同一表单，两种来路只换提交去处；字段、样式、判定完全一套。
+        form.on('submit(book-build-manual)', function (data) {
+            postForm(data.field, MODULE_PATH + 'build');
+            return false;
+        });
+        form.on('submit(book-build-batch)', function (data) {
+            $.ajax({
+                url: MODULE_PATH + 'bringOut?batchNo=' + encodeURIComponent($('#f-batchNo').val() || 'WEB-ONE'),
+                type: 'post', contentType: 'application/json',
+                data: JSON.stringify([data.field]),
+                success: function (r) {
+                    if (r.code !== 200) { layer.alert(r.msg, {icon: 2}); return; }
+                    let it = r.data.items[0];
+                    if (it.success) {
+                        layer.msg(it.result.message, {icon: 1, time: 1500}, function () {
+                            layer.closeAll(); table.reload('book-table'); refreshViews();
+                        });
+                    } else {
+                        layer.alert(it.error, {icon: 2, title: '这一行没过（集中更换带出）'});
+                    }
+                }
+            });
+            return false;
+        });
+
+        function postForm(field, url) {
+            $.post(url, field, function (r) {
+                if (r.code === 200) {
+                    layer.msg(r.data.message, {icon: 1, time: 1500}, function () {
+                        layer.closeAll(); table.reload('book-table'); refreshViews();
+                    });
+                } else {
+                    layer.alert(r.msg, {icon: 2, title: '这一行没过'});
+                }
+            });
+        }
+
+        $('#cfg-page-btn').on('click', function () {
+            postThenRefresh(MODULE_PATH + 'configurePageSize', {pageSize: $('#cfg-page-size').val()}, '条数已改');
+        });
+
+        $('#sync-city-btn').on('click', function () {
+            layer.prompt({title: '市里增量行 JSON 数组（可留空：只推进游标）', formType: 2, area: ['600px', '240px']},
+                function (text) {
+                    let rows = [];
+                    if (text && text.trim()) { try { rows = JSON.parse(text); } catch (e) { layer.msg('JSON 解析不了', {icon: 2}); return; } }
+                    $.ajax({
+                        url: MODULE_PATH + 'syncCity', type: 'post', contentType: 'application/json',
+                        data: JSON.stringify(rows),
+                        success: function (r) {
+                            layer.closeAll();
+                            if (r.code !== 200) { layer.alert(r.msg, {icon: 2}); return; }
+                            let c = r.data;
+                            let msg = r.msg + '\n冲突逐条（以本局为准，不静默覆盖）：\n'
+                                + c.conflicts.map(function (x) {
+                                    return '[' + x.kind + '] ' + x.spotNo + ' ' + x.areaNo
+                                        + '：本局「' + x.localName + '」 vs 市里「' + x.cityName + '」';
+                                }).join('\n');
+                            layer.alert(msg || r.msg, {title: '本次同步结果'});
+                        }
+                    });
+                });
+        });
+    });
+</script>
+
+<form class="layui-form" id="book-build-panel" style="display:none;padding:20px;">
+    <div class="layui-form-item">
+        <label class="layui-form-label">点位编码</label>
+        <div class="layui-input-block">
+            <input type="text" name="spotNo" required lay-verify="required" placeholder="报送材料自带，系统不另发" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">路段代号</label>
+        <div class="layui-input-block">
+            <input type="text" name="areaNo" required lay-verify="required" placeholder="挂靠辖段，须在目录内且未注销" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">经度</label>
+        <div class="layui-input-inline" style="width:140px;">
+            <input type="number" step="any" name="longitude" required lay-verify="required" placeholder="现场采集" class="layui-input">
+        </div>
+        <label class="layui-form-label" style="width:60px;">纬度</label>
+        <div class="layui-input-inline" style="width:140px;">
+            <input type="number" step="any" name="latitude" required lay-verify="required" placeholder="现场采集" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">核定应设</label>
+        <div class="layui-input-inline" style="width:130px;">
+            <input type="text" name="needText" required lay-verify="required" placeholder="整数，不小于已核验" class="layui-input">
+        </div>
+        <label class="layui-form-label" style="width:90px;">已核验落地</label>
+        <div class="layui-input-inline" style="width:130px;">
+            <input type="text" name="gotText" placeholder="整数；待补由系统轧，无录入口" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">集中更换批次</label>
+        <div class="layui-input-block">
+            <input type="text" id="f-batchNo" placeholder="仅「集中更换带出」使用；逐条建立留空" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">题名要件</label>
+        <div class="layui-input-block">
+            <textarea name="content" class="layui-textarea"></textarea>
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <div class="layui-input-block">
+            <button class="pear-btn pear-btn-primary" lay-submit lay-filter="book-build-manual">建档岗逐条建立</button>
+            <button class="pear-btn pear-btn-warming" lay-submit lay-filter="book-build-batch">集中更换带出</button>
+        </div>
+    </div>
+</form>
+</body>
+</html>

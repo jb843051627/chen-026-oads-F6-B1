@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" xmlns:sec="http://www.pollix.at/thymeleaf/shiro">
+<head>
+    <th:block th:include="include :: header('设置许可核准单台账')"/>
+</head>
+<body class="pear-container">
+<div class="layui-card">
+    <div class="layui-card-body">
+        <form class="layui-form" action="">
+            <div class="layui-form-item">
+                <label class="layui-form-label">核准单号</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="billNo" placeholder="核准单号" class="layui-input">
+                </div>
+                <label class="layui-form-label">点位码</label>
+                <div class="layui-input-inline">
+                    <input type="text" name="spotNo" placeholder="点位主档点位码" class="layui-input">
+                </div>
+                <label class="layui-form-label">情形</label>
+                <div class="layui-input-inline">
+                    <select name="status">
+                        <option value="">全部</option>
+                        <option value="0">在签（含待议）</option>
+                        <option value="1">已封存</option>
+                        <option value="2">本段压回重走</option>
+                    </select>
+                </div>
+                <button class="pear-btn pear-btn-md pear-btn-primary" lay-submit lay-filter="permit-query">
+                    <i class="layui-icon layui-icon-search"></i>
+                    查询
+                </button>
+                <button type="reset" class="pear-btn pear-btn-md">
+                    <i class="layui-icon layui-icon-refresh"></i>
+                    重置
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+<div class="layui-card">
+    <div class="layui-card-body">
+        <blockquote class="layui-elem-quote">
+            未封存单据：<span id="permit-unsealed" th:text="${unsealedCount}">0</span> 张
+            （建单加一、封存减一，与逐段累加同一次计算）
+            <button class="pear-btn pear-btn-sm pear-btn-warming" id="permit-reconcile-btn">
+                <i class="layui-icon layui-icon-auz"></i> 对账
+            </button>
+        </blockquote>
+    </div>
+</div>
+<div class="layui-card">
+    <div class="layui-card-body">
+        <table id="permit-table" lay-filter="permit-table"></table>
+    </div>
+</div>
+
+<script type="text/html" id="permit-toolbar">
+    <button shiro:hasPermission="oads:oadsPermitBill:create" class="pear-btn pear-btn-primary pear-btn-md" lay-event="createFromSpot">
+        <i class="layui-icon layui-icon-add-1"></i>
+        由点位主档立单
+    </button>
+</script>
+
+<script type="text/html" id="permit-bar">
+    <button shiro:hasPermission="oads:oadsPermitBill:view" class="pear-btn pear-btn-primary pear-btn-sm" lay-event="detail" title="整单">
+        <i class="layui-icon layui-icon-form"></i>
+    </button>
+</script>
+
+<script type="text/html" id="permit-status">
+    {{#if (d.status == 1) { }}
+    <span class="layui-badge layui-bg-green">已封存</span>
+    {{# }else if(d.status == 2){ }}
+    <span class="layui-badge layui-bg-orange">压回重走</span>
+    {{# }else { }}
+    <span class="layui-badge layui-bg-blue">在签</span>
+    {{# } }}
+</script>
+
+<script type="text/html" id="permit-kind">
+    {{#if (d.changeKind == 'HANG') { }}挂上去{{# }else if(d.changeKind == 'MOVE'){ }}改位置{{# }else if(d.changeKind == 'REMOVE'){ }}整块拆除{{# } }}
+</script>
+
+<th:block th:include="include :: footer"/>
+<script>
+    layui.use(['table', 'form', 'jquery', 'layer'], function () {
+        let table = layui.table;
+        let form = layui.form;
+        let $ = layui.jquery;
+        let layer = layui.layer;
+
+        let MODULE_PATH = rootPath + "/oadsPermitBill/";
+        let cols = [[
+            {title: 'ID', field: 'id', align: 'center', width: 180},
+            {title: '核准单号', field: 'billNo', align: 'left'},
+            {title: '点位码', field: 'spotNo', align: 'center'},
+            {title: '变更情形', field: 'changeKind', align: 'center', toolbar: '#permit-kind'},
+            {title: '当前段', field: 'nodeNo', align: 'center',
+                templet: function (d) {
+                    return ['窗口受理', '区局核定', '市局备案'][d.nodeNo] + '（第' + (d.roundNo || 1) + '轮）';
+                }},
+            {title: '本段已签', field: 'signCount', align: 'center',
+                templet: function (d) { return (d.signCount == null ? 0 : d.signCount) + ' / ' + d.needCount; }},
+            {title: '情形', field: 'status', align: 'center', toolbar: '#permit-status'},
+            {title: '立单时刻', field: 'createTime', align: 'center'},
+            {title: '封存时刻', field: 'sealedAt', align: 'center'},
+            {title: '操作', toolbar: '#permit-bar', align: 'center', width: 90}
+        ]];
+
+        table.render({
+            elem: '#permit-table',
+            url: MODULE_PATH + 'list',
+            page: true,
+            method: 'get',
+            cols: cols,
+            skin: 'line',
+            toolbar: '#permit-toolbar',
+            defaultToolbar: ['refresh', 'filter', 'print', 'exports']
+        });
+
+        table.on('tool(permit-table)', function (obj) {
+            if (obj.event === 'detail') {
+                window.location.href = MODULE_PATH + 'detail/' + obj.data['id'];
+            }
+        });
+
+        table.on('toolbar(permit-table)', function (obj) {
+            if (obj.event === 'createFromSpot') {
+                layer.open({
+                    type: 1,
+                    title: '由点位主档立单（同点位同变更在途只一张）',
+                    shade: 0.1,
+                    area: ['460px', '320px'],
+                    content: $('#permit-create-panel')
+                });
+            }
+        });
+
+        form.on('submit(permit-query)', function (data) {
+            table.reload('permit-table', {where: data.field, page: {curr: 1}});
+            return false;
+        });
+
+        $('#permit-reconcile-btn').on('click', function () {
+            $.get(MODULE_PATH + 'reconcile', function (result) {
+                if (result.code === 200) {
+                    let c = result.data;
+                    let msg = '账面未封存 ' + c.unsealedCount + ' 张，逐段重算 ' + c.recountedCount + ' 张。';
+                    if (c.balanced) {
+                        layer.msg(msg + '账账相符', {icon: 1});
+                    } else {
+                        layer.alert(msg + '\n对不上的单据：\n' + c.mismatches.join('\n'), {icon: 2, title: '账面对不上'});
+                    }
+                } else {
+                    layer.msg(result.msg, {icon: 2});
+                }
+            });
+        });
+
+        form.on('submit(permit-create-submit)', function (data) {
+            $.ajax({
+                url: MODULE_PATH + 'createFromSpot',
+                type: 'post',
+                data: data.field,
+                success: function (result) {
+                    if (result.code === 200) {
+                        layer.msg(result.msg, {icon: 1, time: 1200}, function () {
+                            layer.closeAll();
+                            table.reload('permit-table');
+                            $.get(MODULE_PATH + 'unsealedCount', function (r) {
+                                if (r.code === 200) {
+                                    $('#permit-unsealed').text(r.count);
+                                }
+                            });
+                        });
+                    } else {
+                        layer.msg(result.msg, {icon: 2});
+                    }
+                }
+            });
+            return false;
+        });
+    });
+</script>
+
+<form class="layui-form" id="permit-create-panel" style="display:none;padding:20px;">
+    <div class="layui-form-item">
+        <label class="layui-form-label">点位主档行</label>
+        <div class="layui-input-block">
+            <input type="text" name="spotId" required lay-verify="required" placeholder="点位主档记录ID（单据唯一来源）" class="layui-input">
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <label class="layui-form-label">变更情形</label>
+        <div class="layui-input-block">
+            <select name="changeKind" lay-verify="required">
+                <option value="HANG">挂上去</option>
+                <option value="MOVE">改位置</option>
+                <option value="REMOVE">整块拆除</option>
+            </select>
+        </div>
+    </div>
+    <div class="layui-form-item">
+        <div class="layui-input-block">
+            <button class="pear-btn pear-btn-primary" lay-submit lay-filter="permit-create-submit">立单</button>
+        </div>
+    </div>
+</form>
+</body>
+</html>
